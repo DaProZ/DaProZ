@@ -36,19 +36,17 @@ const strategies = {
    * BOLLINGER: Buy when price touches lower band; sell at upper band.
    */
   BOLLINGER(indis) {
-    const { bollinger } = indis;
-    const { price, lower, upper, middle } = bollinger;
-    const bandwidth = upper - lower;
-    const posInBand = (price - lower) / bandwidth;
+    const { bollinger, price } = indis;
+    const { pctB, lower, upper } = bollinger;
 
-    if (posInBand < 0.1) {
+    if (pctB < 0.1) {
       return {
         action: 'buy',
         confidence: 0.65,
         reason: `Price near lower Bollinger band (${price.toFixed(2)} vs ${lower.toFixed(2)})`,
       };
     }
-    if (posInBand > 0.9) {
+    if (pctB > 0.9) {
       return {
         action: 'sell',
         confidence: 0.65,
@@ -63,18 +61,18 @@ const strategies = {
    */
   EMA_CROSS(indis) {
     const { ema } = indis;
-    if (ema.ema20 > ema.ema50 * 1.002) {
+    if (ema.ema21 > ema.ema50 * 1.002) {
       return {
         action: 'buy',
         confidence: 0.6,
-        reason: `Golden cross: EMA20 (${ema.ema20.toFixed(2)}) > EMA50 (${ema.ema50.toFixed(2)})`,
+        reason: `Golden cross: EMA21 (${ema.ema21.toFixed(2)}) > EMA50 (${ema.ema50.toFixed(2)})`,
       };
     }
-    if (ema.ema20 < ema.ema50 * 0.998) {
+    if (ema.ema21 < ema.ema50 * 0.998) {
       return {
         action: 'sell',
         confidence: 0.6,
-        reason: `Death cross: EMA20 (${ema.ema20.toFixed(2)}) < EMA50 (${ema.ema50.toFixed(2)})`,
+        reason: `Death cross: EMA21 (${ema.ema21.toFixed(2)}) < EMA50 (${ema.ema50.toFixed(2)})`,
       };
     }
     return { action: 'hold', confidence: 0.5, reason: 'EMAs converging' };
