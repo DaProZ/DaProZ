@@ -18,6 +18,12 @@ app.use(express.json());
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
+// Start Binance multi-timeframe streams on boot
+binance.initStreams((pair, tf, candle) => {
+  // Broadcast live candle updates to all dashboard clients
+  broadcast({ type: 'candleUpdate', pair, tf, data: candle });
+});
+
 // Active bot state
 const state = {
   running: false,
@@ -86,7 +92,7 @@ async function handleAction(action, payload, ws) {
 async function startTradingLoop() {
   while (state.running) {
     try {
-      const candles = await binance.getCandles(state.symbol, '1h', 100);
+      const candles = await binance.getCachedCandles(state.symbol, '1h');
       const closes = candles.map((c) => c.close);
       const highs = candles.map((c) => c.high);
       const lows = candles.map((c) => c.low);
@@ -138,10 +144,25 @@ app.get('/api/health', (_req, res) => res.json({ status: 'ok' }));
 app.get('/api/state', (_req, res) => res.json(state));
 app.get('/api/trades', (_req, res) => res.json(state.trades));
 
+// Legacy query-param endpoint
 app.get('/api/candles', async (req, res) => {
   const { symbol = 'BTCUSDT', interval = '1h', limit = 100 } = req.query;
   const candles = await binance.getCandles(symbol, interval, Number(limit));
   res.json(candles);
+});
+
+// Multi-timeframe endpoint: GET /api/candles/:pair/:timeframe
+// Returns up to 300 cached candles from the in-memory store.
+// Supported pairs: BTCUSDT, ETHUSDT, SOLUSDT, BNBUSDT, XRPUSDT
+// Supported timeframes: 5m, 15m, 1h, 4h, 1d
+app.get('/api/candles/:pair/:timeframe', async (req, res) => {
+  try {
+    const { pair, timeframe } = req.params;
+    const candles = await binance.getCachedCandles(pair, timeframe);
+    res.json(candles);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
 });
 
 app.post('/api/claude-analyze', async (req, res) => {
