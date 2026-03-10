@@ -2,8 +2,47 @@
 @tailwind components;
 @tailwind utilities;
 
-body {
-  background-color: #0d1117;
-  color: #c9d1d9;
-  font-family: 'Segoe UI', system-ui, sans-serif;
+/* ── Terminal-style base ─────────────────────────────────────── */
+:root {
+  --bg-dark:   #0a0d12;
+  --bg-card:   #111419;
+  --border:    #21262d;
+  --green:     #3fb950;
+  --red:       #f85149;
+  --blue:      #58a6ff;
+  --yellow:    #d29922;
 }
+
+* { box-sizing: border-box; }
+html { font-size: 14px; }
+
+body {
+  background-color: var(--bg-dark);
+  color: #c9d1d9;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', ui-monospace, 'Segoe UI', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar        { width: 4px; height: 4px; }
+::-webkit-scrollbar-track  { background: var(--bg-dark); }
+::-webkit-scrollbar-thumb  { background: #30363d; border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: #484f58; }
+
+/* Subtle scan-line CRT overlay */
+body::after {
+  content: '';
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0,0,0,0.025) 2px,
+    rgba(0,0,0,0.025) 4px
+  );
+  z-index: 9999;
+}
+
+select, input { color-scheme: dark; }

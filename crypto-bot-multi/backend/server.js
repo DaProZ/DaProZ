@@ -84,24 +84,96 @@ async function handleAction(action, payload, ws) {
       break;
     }
 
+    case 'getMultiData': {
+      const pair = payload.symbol || state.symbol;
+      try {
+        // 1. Fetch candles for all timeframes in parallel
+        const [c5m, c15m, c1h, c4h, c1d] = await Promise.all([
+          binance.getCachedCandles(pair, '5m'),
+          binance.getCachedCandles(pair, '15m'),
+          binance.getCachedCandles(pair, '1h'),
+          binance.getCachedCandles(pair, '4h'),
+          binance.getCachedCandles(pair, '1d'),
+        ]);
+
+        // 2. Broadcast raw candles so MultiChart renders immediately
+        ws.send(JSON.stringify({
+          type: 'multiCandles',
+          data: { '5m': c5m, '15m': c15m, '1h': c1h, '4h': c4h, '1d': c1d },
+        }));
+
+        // 3. Compute indicators for each timeframe
+        const [ind5m, ind15m, ind1h, ind4h, ind1d] = await Promise.all([
+          indicators.getAll(c5m),
+          indicators.getAll(c15m),
+          indicators.getAll(c1h),
+          indicators.getAll(c4h),
+          indicators.getAll(c1d),
+        ]);
+
+        // 4. Detect trading mode
+        const modeResult = strategyEngine.detectMode(ind5m, ind15m, ind1h, ind4h, ind1d);
+        ws.send(JSON.stringify({ type: 'modeResult', data: modeResult }));
+
+        // Also update indicators panel with the 1h data
+        broadcast({ type: 'indicators', data: ind1h });
+
+        // 5. Claude multi-timeframe analysis (cached 2 min per pair+mode)
+        const allIndicators = { ind5m, ind15m, ind1h, ind4h, ind1d };
+        const multiAnalysis = await claudeAnalysis.analyzeMultiMode(
+          pair, modeResult, allIndicators, riskManager.DEFAULT_CONFIG
+        );
+        ws.send(JSON.stringify({ type: 'claudeMultiAnalysis', data: multiAnalysis }));
+        console.log(`[MultiData] ${pair} → mode=${modeResult.mode} conf=${modeResult.confidence} cached=${multiAnalysis._cached}`);
+      } catch (err) {
+        console.error('[MultiData] Error:', err.message);
+        ws.send(JSON.stringify({ type: 'error', message: `getMultiData: ${err.message}` }));
+      }
+      break;
+    }
+
     default:
       ws.send(JSON.stringify({ type: 'error', message: `Unknown action: ${action}` }));
   }
 }
 
 async function startTradingLoop() {
+  let loopCount = 0;
   while (state.running) {
     try {
       const candles = await binance.getCachedCandles(state.symbol, '1h');
-      const closes = candles.map((c) => c.close);
-      const highs = candles.map((c) => c.high);
-      const lows = candles.map((c) => c.low);
-
-      const indis = await indicators.compute(closes, highs, lows);
-      const signal = strategyEngine.evaluate(state.strategy, indis);
+      const indis   = await indicators.getAll(candles);
+      const signal  = strategyEngine.evaluate(state.strategy, indis);
       const approved = riskManager.approve(signal, state);
 
       broadcast({ type: 'indicators', data: indis });
+
+      // Every 5 ticks (~5 min) refresh full multi-timeframe analysis
+      if (loopCount % 5 === 0) {
+        try {
+          const [c5m, c15m, c4h, c1d] = await Promise.all([
+            binance.getCachedCandles(state.symbol, '5m'),
+            binance.getCachedCandles(state.symbol, '15m'),
+            binance.getCachedCandles(state.symbol, '4h'),
+            binance.getCachedCandles(state.symbol, '1d'),
+          ]);
+          broadcast({ type: 'multiCandles', data: { '5m': c5m, '15m': c15m, '1h': candles, '4h': c4h, '1d': c1d } });
+          const [ind5m, ind15m, ind4h, ind1d] = await Promise.all([
+            indicators.getAll(c5m), indicators.getAll(c15m),
+            indicators.getAll(c4h), indicators.getAll(c1d),
+          ]);
+          const modeResult = strategyEngine.detectMode(ind5m, ind15m, indis, ind4h, ind1d);
+          broadcast({ type: 'modeResult', data: modeResult });
+          const multiAnalysis = await claudeAnalysis.analyzeMultiMode(
+            state.symbol, modeResult, { ind5m, ind15m, ind1h: indis, ind4h, ind1d },
+            riskManager.DEFAULT_CONFIG
+          );
+          broadcast({ type: 'claudeMultiAnalysis', data: multiAnalysis });
+        } catch (mErr) {
+          console.warn('[TradingLoop] multi-data refresh failed:', mErr.message);
+        }
+      }
+      loopCount++;
 
       if (approved && signal.action !== 'hold') {
         const trade = {
