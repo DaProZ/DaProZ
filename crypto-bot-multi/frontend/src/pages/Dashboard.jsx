@@ -11,7 +11,7 @@ import SignalPanel     from '../components/SignalPanel';
 
 export default function Dashboard({
   connected, state, indicators, trades, signal, claudeAnalysis, candles, send,
-  modeResult, multiCandles, claudeMulti,
+  modeResult, multiCandles, claudeMulti, signalRefresh,
 }) {
   const [symbol,   setSymbol]   = useState('BTCUSDT');
   const [strategy, setStrategy] = useState('RSI_MACD');
@@ -78,13 +78,11 @@ export default function Dashboard({
         <IndicatorsPanel indicators={indicators} />
       </div>
 
-      {/* Price chart + trade log */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-        <div className="lg:col-span-2">
-          <CandleChart candles={candles} symbol={symbol} />
-        </div>
-        <TradeLog trades={trades} />
-      </div>
+      {/* Price chart */}
+      <CandleChart candles={candles} symbol={symbol} />
+
+      {/* Signal history (full width — it has its own scroll) */}
+      <TradeLog pair={symbol} refreshTrigger={signalRefresh} />
 
       {/* Legacy Claude panel (fallback when no multi-analysis yet) */}
       {claudeAnalysis && !claudeMulti && <ClaudePanel analysis={claudeAnalysis} />}

@@ -5,11 +5,12 @@ const { WebSocketServer } = require('ws');
 const http = require('http');
 const { v4: uuidv4 } = require('uuid');
 
-const binance = require('./binance');
-const indicators = require('./indicators');
+const binance        = require('./binance');
+const indicators     = require('./indicators');
 const strategyEngine = require('./strategy-engine');
-const riskManager = require('./risk-manager');
+const riskManager    = require('./risk-manager');
 const claudeAnalysis = require('./claude-analysis');
+const signalDb       = require('./signal-db');
 
 const app = express();
 app.use(cors());
@@ -125,6 +126,25 @@ async function handleAction(action, payload, ws) {
         );
         ws.send(JSON.stringify({ type: 'claudeMultiAnalysis', data: multiAnalysis }));
         console.log(`[MultiData] ${pair} → mode=${modeResult.mode} conf=${modeResult.confidence} cached=${multiAnalysis._cached}`);
+
+        // Persist actionable signals (skip neutrals and cached repeats)
+        if (multiAnalysis.señal !== 'neutro' && !multiAnalysis._cached && multiAnalysis.entrada_ideal) {
+          const riskUSDT = +(riskManager.DEFAULT_CONFIG.portfolioValue * riskManager.DEFAULT_CONFIG.riskPerTrade).toFixed(2);
+          const sigId = signalDb.insertSignal({
+            par:              pair,
+            modo:             multiAnalysis.modo              ?? modeResult.mode,
+            señal:            multiAnalysis.señal,
+            entrada:          multiAnalysis.entrada_ideal,
+            stopLoss:         multiAnalysis.stopLoss,
+            takeProfit:       multiAnalysis.takeProfit,
+            confianza:        multiAnalysis.confianza,
+            duracion_estimada: multiAnalysis.duracion_estimada,
+            riskUSDT,
+          });
+          const logged = signalDb.getHistory(pair, 1)[0];
+          broadcast({ type: 'signalLogged', data: logged });
+          console.log(`[SignalDB] Logged ${multiAnalysis.señal} ${pair} id=${sigId}`);
+        }
       } catch (err) {
         console.error('[MultiData] Error:', err.message);
         ws.send(JSON.stringify({ type: 'error', message: `getMultiData: ${err.message}` }));
@@ -175,12 +195,21 @@ async function startTradingLoop() {
       }
       loopCount++;
 
+      // Check if any open signals hit SL/TP this tick
+      const latestCandle = candles[candles.length - 1];
+      const closedSigs   = signalDb.checkAndCloseSignals(state.symbol, latestCandle);
+      for (const s of closedSigs) {
+        broadcast({ type: 'signalClosed', data: s });
+        console.log(`[SignalDB] Auto-closed ${s.id} → ${s.resultado} pnl=${s.pnl}`);
+      }
+
       if (approved && signal.action !== 'hold') {
+        const price = indis.price;
         const trade = {
           id: uuidv4(),
           symbol: state.symbol,
           action: signal.action,
-          price: closes[closes.length - 1],
+          price,
           quantity: riskManager.calcQuantity(signal, state),
           timestamp: Date.now(),
           reason: signal.reason,
@@ -241,6 +270,40 @@ app.post('/api/claude-analyze', async (req, res) => {
   const { symbol, candles } = req.body;
   const analysis = await claudeAnalysis.analyze(symbol, candles);
   res.json(analysis);
+});
+
+// ── Signal history ────────────────────────────────────────────────────────────
+// GET /api/signals/history?pair=BTCUSDT&limit=50
+app.get('/api/signals/history', (req, res) => {
+  const { pair, limit = 50 } = req.query;
+  try {
+    const rows = signalDb.getHistory(pair || null, Number(limit));
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/signals/stats?pair=BTCUSDT
+app.get('/api/signals/stats', (req, res) => {
+  const { pair } = req.query;
+  try {
+    res.json(signalDb.getStats(pair || null));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PATCH /api/signals/:id  — manual close (result + pnl override)
+app.patch('/api/signals/:id', (req, res) => {
+  const { resultado, pnl } = req.body;
+  if (!resultado) return res.status(400).json({ error: 'resultado required' });
+  try {
+    signalDb.closeSignal(req.params.id, resultado, pnl ?? 0);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 const PORT = process.env.PORT || 3001;

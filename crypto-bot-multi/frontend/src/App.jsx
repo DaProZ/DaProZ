@@ -13,10 +13,12 @@ export default function App() {
   const [signal,            setSignal]            = useState(null);
   const [claudeAnalysis,    setClaudeAnalysis]    = useState(null);
   const [candles,           setCandles]           = useState([]);
-  // New: multi-timeframe data
+  // Multi-timeframe data
   const [modeResult,        setModeResult]        = useState(null);
   const [multiCandles,      setMultiCandles]      = useState({});
   const [claudeMulti,       setClaudeMulti]       = useState(null);
+  // Signal DB: bump to trigger TradeLog refresh
+  const [signalRefresh,     setSignalRefresh]     = useState(0);
 
   useEffect(() => {
     messages.forEach((msg) => {
@@ -49,6 +51,11 @@ export default function App() {
         case 'claudeMultiAnalysis':
           setClaudeMulti(msg.data);
           break;
+        // Signal DB events → trigger TradeLog re-fetch
+        case 'signalLogged':
+        case 'signalClosed':
+          setSignalRefresh((n) => n + 1);
+          break;
       }
     });
   }, [messages]);
@@ -67,6 +74,8 @@ export default function App() {
       modeResult={modeResult}
       multiCandles={multiCandles}
       claudeMulti={claudeMulti}
+      // Signal DB
+      signalRefresh={signalRefresh}
     />
   );
 }
