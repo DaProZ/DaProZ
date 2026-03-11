@@ -175,6 +175,80 @@ Si persiste, habilitar rutas largas en Windows:
 reg add "HKLM\SYSTEM\CurrentControlSet\Control\FileSystem" /v LongPathsEnabled /t REG_DWORD /d 1 /f
 ```
 
+### TAR_ENTRY_ERROR / módulos corruptos en Windows (Antivirus)
+Windows Defender bloquea escrituras concurrentes durante la extracción de npm, corrompiendo archivos. Síntomas: `TAR_ENTRY_ERROR UNKNOWN: unknown error, write` o módulos con archivos vacíos/truncados.
+
+**Solución — descarga manual vía Node.js** (bypasea el extractor de npm):
+```js
+const https = require('https'), zlib = require('zlib'), tar = require('tar'), fs = require('fs');
+const base = './node_modules/';
+function dl(pkg, version) {
+  return new Promise(resolve => {
+    const dest = base + pkg;
+    if (fs.existsSync(dest + '/package.json')) return resolve();
+    fs.mkdirSync(dest, { recursive: true });
+    const url = `https://registry.npmjs.org/${pkg}/${version || 'latest'}`;
+    https.get(url, res => {
+      let d = ''; res.on('data', c => d += c);
+      res.on('end', () => {
+        const info = JSON.parse(d);
+        const tarball = info.dist?.tarball ?? info.versions[info['dist-tags'].latest].dist.tarball;
+        https.get(tarball, r2 => {
+          r2.pipe(zlib.createGunzip()).pipe(tar.x({strip:1, cwd:dest}))
+            .on('finish', resolve).on('error', resolve);
+        });
+      });
+    });
+  });
+}
+// Uso: await dl('react', '18.3.1');  o  await dl('lodash');
+```
+Para versión específica usar `https://registry.npmjs.org/<pkg>/<version>` (sin `/latest`).
+
+### `tulind` — no hay prebuilt para Node v24 (ABI 137)
+No existe binario precompilado para Node.js v24+ en el repositorio S3 de tulind. Compilar desde fuente:
+```bash
+cd backend/node_modules/tulind
+# 1. Descargar tiamalgamation.c correcto (el incluido puede estar truncado)
+curl -o external/tiamalgamation.c https://raw.githubusercontent.com/TulipCharts/tulipnode/master/external/tiamalgamation.c
+# 2. Compilar con node-gyp
+node-gyp rebuild --target=$(node -e "console.log(process.version.slice(1))") --arch=x64
+# 3. Copiar el binario
+mkdir -p lib/binding/Release/node-v137-win32-x64
+cp build/lib/binding/Release/node-v137-win32-x64/tulind.node lib/binding/Release/node-v137-win32-x64/
+```
+Requiere: Python 3.x + Visual Studio Build Tools (Windows) o gcc (Linux/Mac).
+
+### Frontend CSS plano — Tailwind no genera utility classes
+En proyectos con `"type": "module"` en `package.json`, Tailwind v3 falla al leer `tailwind.config.js` con `export default` porque `jiti` retorna `{ default: {...} }` sin desempaquetar.
+
+**Dos síntomas en los logs de Vite:**
+- `The 'content' option is missing or empty` → config no se carga
+- `No utility classes were detected` → config carga pero paths son relativos a `process.cwd()` incorrecto
+
+**Solución:**
+1. Renombrar a `tailwind.config.cjs` y `postcss.config.cjs` usando `module.exports`
+2. Usar paths absolutos con `__dirname` en el config:
+```js
+// tailwind.config.cjs
+const path = require('path');
+module.exports = {
+  content: [
+    path.resolve(__dirname, './index.html'),
+    path.resolve(__dirname, './src/**/*.{js,jsx}'),
+  ],
+  // ...
+};
+// postcss.config.cjs
+module.exports = {
+  plugins: {
+    tailwindcss: { config: require('path').resolve(__dirname, './tailwind.config.cjs') },
+    autoprefixer: {},
+  },
+};
+```
+3. Instalar versiones correctas de deps: `jiti@^1.21.0` (no v2) y `picomatch@^2.3.1` (no v4)
+
 ### 403 en seed de Binance
 Binance bloquea IPs de cloud/VPS. En local funciona sin problemas.
 
