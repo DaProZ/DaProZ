@@ -8,11 +8,12 @@ import ClaudePanel     from '../components/ClaudePanel';
 import ModeSelector    from '../components/ModeSelector';
 import MultiChart      from '../components/MultiChart';
 import SignalPanel     from '../components/SignalPanel';
+import RiskPanel       from '../components/RiskPanel';
 
 export default function Dashboard({
   connected, state, indicators, trades, signal, claudeAnalysis, candles, send,
-  modeResult, multiCandles, claudeMulti, signalRefresh,
-  dbStats, onTogglePaperTrading,
+  modeResult, multiCandles, claudeHistory = [], signalRefresh,
+  dbStats, onTogglePaperTrading, onTradeSizeChange, onRiskConfigChange,
 }) {
   const [symbol,        setSymbol]        = useState('BTCUSDT');
   const [strategy,      setStrategy]      = useState('RSI_MACD');
@@ -40,8 +41,10 @@ export default function Dashboard({
     setTimeout(() => setLoadingMulti(false), 5000);
   }
 
-  const candles1h     = multiCandles?.['1h'] ?? candles;
-  const isPaper       = state?.paperTrading !== false; // default true
+  const candles1h  = multiCandles?.['1h'] ?? candles;
+  const isPaper    = state?.paperTrading !== false; // default true
+  const tradeSize  = state?.tradeSize ?? 100;
+  const riskConfig = state?.riskConfig ?? null;
 
   return (
     <div className="min-h-screen bg-brand-dark text-gray-200 p-3 lg:p-4 space-y-3">
@@ -54,7 +57,7 @@ export default function Dashboard({
           </span>
           <span className={`text-xs px-2 py-0.5 rounded-full font-semibold border ${connected
             ? 'bg-brand-green/10 text-brand-green border-brand-green/30'
-            : 'bg-brand-red/10 text-brand-red border-brand-red/30'}`}>
+            : 'bg-brand-red/10 text-brand-red border-brand-red/40'}`}>
             {connected ? '● WS' : '○ OFF'}
           </span>
         </div>
@@ -84,9 +87,11 @@ export default function Dashboard({
       {/* Controls */}
       <BotControls
         symbol={symbol} strategy={strategy} running={state?.running}
+        tradeSize={tradeSize}
         onSymbolChange={setSymbol} onStrategyChange={setStrategy}
         onStart={handleStart} onStop={handleStop}
         onAnalyze={handleAnalyze} onMultiAnalyze={handleMultiAnalyze}
+        onTradeSizeChange={onTradeSizeChange}
         loadingMulti={loadingMulti} loadingAnalyze={loadingAnalyze}
       />
 
@@ -105,18 +110,26 @@ export default function Dashboard({
 
       {/* Claude signal + indicators */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-        <SignalPanel analysis={claudeMulti ?? claudeAnalysis} candles1h={candles1h} isPaper={isPaper} />
+        <SignalPanel history={claudeHistory} candles1h={candles1h} isPaper={isPaper} />
         <IndicatorsPanel indicators={indicators} />
       </div>
+
+      {/* Risk Manager */}
+      <RiskPanel
+        riskConfig={riskConfig}
+        onRiskConfigChange={onRiskConfigChange}
+        pair={symbol}
+        refreshTrigger={signalRefresh}
+      />
 
       {/* Price chart */}
       <CandleChart candles={candles} symbol={symbol} />
 
-      {/* Signal history */}
-      <TradeLog pair={symbol} refreshTrigger={signalRefresh} />
+      {/* Signal history — paper or real, clearly labeled */}
+      <TradeLog pair={symbol} refreshTrigger={signalRefresh} isPaper={isPaper} />
 
-      {/* Legacy Claude panel (fallback) */}
-      {claudeAnalysis && !claudeMulti && <ClaudePanel analysis={claudeAnalysis} />}
+      {/* Legacy Claude panel (fallback for single-TF analysis when no multi yet) */}
+      {claudeAnalysis && claudeHistory.length === 0 && <ClaudePanel analysis={claudeAnalysis} />}
     </div>
   );
 }

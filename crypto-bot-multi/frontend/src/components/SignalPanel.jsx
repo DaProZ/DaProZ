@@ -1,3 +1,4 @@
+import { useState, useEffect, useRef } from 'react';
 import {
   ComposedChart, Line, ReferenceLine, ReferenceArea,
   XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
@@ -56,6 +57,11 @@ function rrColor(rr) {
   return '#f85149';
 }
 
+function fmtTabTime(ts) {
+  if (!ts) return '?';
+  return new Date(ts).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
+}
+
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 function LevelRow({ label, value, color, icon }) {
@@ -81,7 +87,6 @@ function ConfidenceBar({ value, color }) {
         <span className="font-semibold tabular-nums" style={{ color }}>{pct}%</span>
       </div>
       <div className="h-2 bg-brand-dark rounded-full overflow-hidden relative">
-        {/* Graduated tick marks */}
         {[25, 50, 75].map((t) => (
           <div
             key={t}
@@ -102,7 +107,6 @@ function ConfidenceBar({ value, color }) {
   );
 }
 
-// Custom tooltip for the price chart
 const ChartTooltip = ({ active, payload, label }) => {
   if (!active || !payload?.length) return null;
   return (
@@ -113,17 +117,9 @@ const ChartTooltip = ({ active, payload, label }) => {
   );
 };
 
-// ─── Main component ───────────────────────────────────────────────────────────
+// ─── Analysis body ────────────────────────────────────────────────────────────
 
-export default function SignalPanel({ analysis, candles1h = [], isPaper = true }) {
-  if (!analysis) {
-    return (
-      <div className="bg-brand-card border border-brand-border rounded-lg p-4 flex items-center justify-center min-h-[220px]">
-        <p className="text-xs text-gray-600 tracking-widest uppercase">Esperando señal de Claude…</p>
-      </div>
-    );
-  }
-
+function AnalysisBody({ analysis, candles1h, isPaper }) {
   const {
     señal = 'neutro',
     confianza = 0,
@@ -136,20 +132,17 @@ export default function SignalPanel({ analysis, candles1h = [], isPaper = true }
     puntos_clave = [],
     alertas = [],
     _cached,
-    _ts,
     _source,
   } = analysis;
 
   const cfg = SIGNAL_CFG[señal] ?? SIGNAL_CFG.neutro;
   const rr  = calcRR(señal, entrada_ideal, stopLoss, takeProfit);
 
-  // Chart data: last 50 1h candles
   const chartData = candles1h.slice(-50).map((c) => ({
     t:     new Date(c.time * 1000).toLocaleDateString('es', { month: 'numeric', day: 'numeric' }),
     close: c.close,
   }));
 
-  // Y-axis domain that always includes SL/TP
   const prices = chartData.map((d) => d.close);
   const rawMin = Math.min(...prices, stopLoss ?? Infinity, entrada_ideal ?? Infinity);
   const rawMax = Math.max(...prices, takeProfit ?? -Infinity, entrada_ideal ?? -Infinity);
@@ -158,31 +151,15 @@ export default function SignalPanel({ analysis, candles1h = [], isPaper = true }
   const yMax   = isFinite(rawMax) ? rawMax + pad : 'auto';
 
   return (
-    <div className="bg-brand-card border border-brand-border rounded-lg p-4 space-y-4">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-1.5">
-          <h2 className="text-sm font-semibold text-gray-400 tracking-wide">Señal Claude AI</h2>
-          <InfoIcon text="Análisis generado por claude-haiku. Combina indicadores técnicos de 5 timeframes para dar una recomendación con entrada, SL y TP sugeridos." />
-        </div>
-        <div className="flex items-center gap-2 text-xs text-gray-600">
-          {_cached && (
-            <span className="px-1.5 py-0.5 rounded border border-brand-border bg-brand-dark">
-              CACHE
-            </span>
-          )}
-          {_ts && <span>{new Date(_ts).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })}</span>}
-        </div>
-      </div>
-
+    <div className="space-y-4">
       {/* Paper / Real notice */}
       {isPaper ? (
         <div className="flex items-start gap-2 rounded px-2.5 py-2 text-xs leading-snug"
              style={{ background: 'rgba(234,179,8,0.06)', border: '1px solid rgba(234,179,8,0.25)', color: '#8b949e' }}>
           <span style={{ color: '#eab308' }} className="flex-shrink-0">📄</span>
           <span>
-            <span style={{ color: '#eab308' }} className="font-semibold">PAPER ($100/op) — </span>
-            El bot simula <strong className="text-gray-300">$100 por señal</strong>, monitorea
+            <span style={{ color: '#eab308' }} className="font-semibold">PAPER — </span>
+            El bot simula operaciones con el monto configurado, monitorea
             SL/TP en cada vela y registra WIN/LOSS automáticamente.
             <strong className="text-gray-300"> Sin dinero real.</strong>
           </span>
@@ -194,14 +171,13 @@ export default function SignalPanel({ analysis, candles1h = [], isPaper = true }
           <span>
             <span className="text-brand-red font-semibold">TRADING REAL — </span>
             El bot ejecuta <strong className="text-gray-300">market orders reales en Binance</strong>.
-            SL/TP se monitorean en software (no son órdenes stop en Binance todavía).
+            SL/TP se monitorean en software.
           </span>
         </div>
       )}
 
       {/* Signal badge + levels */}
       <div className="grid grid-cols-5 gap-3">
-        {/* Badge — spans 2 cols */}
         <div
           className="col-span-2 rounded-lg p-3 flex flex-col items-center justify-center gap-1.5"
           style={{ background: cfg.bg, border: `1px solid ${cfg.border}`, boxShadow: cfg.glow }}
@@ -224,11 +200,10 @@ export default function SignalPanel({ analysis, candles1h = [], isPaper = true }
           )}
         </div>
 
-        {/* Level rows — spans 3 cols */}
         <div className="col-span-3">
-          <LevelRow label="Entrada"     value={entrada_ideal} color="#58a6ff" icon="→" />
-          <LevelRow label="Stop Loss ⚑" value={stopLoss}      color="#f85149" icon="✕" />
-          <LevelRow label="Take Profit ✦" value={takeProfit}  color="#3fb950" icon="✓" />
+          <LevelRow label="Entrada"       value={entrada_ideal} color="#58a6ff" icon="→" />
+          <LevelRow label="Stop Loss ⚑"   value={stopLoss}      color="#f85149" icon="✕" />
+          <LevelRow label="Take Profit ✦" value={takeProfit}    color="#3fb950" icon="✓" />
           {rr !== null && (
             <div className="flex items-center justify-between pt-1.5 mt-0.5 border-t border-brand-border">
               <div className="flex items-center gap-1">
@@ -246,7 +221,7 @@ export default function SignalPanel({ analysis, candles1h = [], isPaper = true }
       {/* Confidence bar */}
       <ConfidenceBar value={confianza} color={cfg.color} />
 
-      {/* Price chart with SL / Entry / TP lines */}
+      {/* Price chart */}
       {chartData.length > 0 && (
         <div>
           <div className="flex items-center justify-between mb-1">
@@ -284,8 +259,6 @@ export default function SignalPanel({ analysis, candles1h = [], isPaper = true }
                 tickFormatter={fmtPrice}
               />
               <Tooltip content={<ChartTooltip />} />
-
-              {/* Shaded risk/reward area */}
               {stopLoss && takeProfit && (
                 <ReferenceArea
                   y1={stopLoss}
@@ -294,7 +267,6 @@ export default function SignalPanel({ analysis, candles1h = [], isPaper = true }
                   fillOpacity={0.04}
                 />
               )}
-
               <Line
                 type="monotone"
                 dataKey="close"
@@ -303,8 +275,6 @@ export default function SignalPanel({ analysis, candles1h = [], isPaper = true }
                 strokeWidth={1.5}
                 name="Precio"
               />
-
-              {/* Entry */}
               {entrada_ideal && (
                 <ReferenceLine
                   y={entrada_ideal}
@@ -314,7 +284,6 @@ export default function SignalPanel({ analysis, candles1h = [], isPaper = true }
                   label={{ value: 'E', position: 'right', fill: '#58a6ff', fontSize: 10 }}
                 />
               )}
-              {/* Take Profit */}
               {takeProfit && (
                 <ReferenceLine
                   y={takeProfit}
@@ -324,7 +293,6 @@ export default function SignalPanel({ analysis, candles1h = [], isPaper = true }
                   label={{ value: 'TP', position: 'right', fill: '#3fb950', fontSize: 10 }}
                 />
               )}
-              {/* Stop Loss */}
               {stopLoss && (
                 <ReferenceLine
                   y={stopLoss}
@@ -385,11 +353,85 @@ export default function SignalPanel({ analysis, candles1h = [], isPaper = true }
       )}
 
       {/* Footer */}
-      {_source && (
-        <p className="text-xs text-gray-600 text-right">
-          via {_source}
-        </p>
-      )}
+      <div className="flex items-center justify-between">
+        {_cached && (
+          <span className="text-xs px-1.5 py-0.5 rounded border border-brand-border bg-brand-dark text-gray-500">
+            CACHE
+          </span>
+        )}
+        {_source && (
+          <p className="text-xs text-gray-600 ml-auto">via {_source}</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Main component ───────────────────────────────────────────────────────────
+
+export default function SignalPanel({ history = [], candles1h = [], isPaper = true }) {
+  const [selectedIdx, setSelectedIdx] = useState(0);
+  const [newPulse,    setNewPulse]    = useState(false);
+  const prevLenRef = useRef(0);
+
+  // Pulse animation + auto-select newest when a new analysis arrives
+  useEffect(() => {
+    if (history.length > prevLenRef.current) {
+      setSelectedIdx(0);
+      setNewPulse(true);
+      const t = setTimeout(() => setNewPulse(false), 2000);
+      prevLenRef.current = history.length;
+      return () => clearTimeout(t);
+    }
+    prevLenRef.current = history.length;
+  }, [history.length]);
+
+  if (history.length === 0) {
+    return (
+      <div className="bg-brand-card border border-brand-border rounded-lg p-4 flex items-center justify-center min-h-[220px]">
+        <p className="text-xs text-gray-600 tracking-widest uppercase">Esperando señal de Claude…</p>
+      </div>
+    );
+  }
+
+  const analysis = history[selectedIdx] ?? history[0];
+
+  return (
+    <div className="bg-brand-card border border-brand-border rounded-lg p-4 space-y-4">
+      {/* Header */}
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="flex items-center gap-1.5">
+          <h2 className="text-sm font-semibold text-gray-400 tracking-wide">Señal Claude AI</h2>
+          <InfoIcon text="Análisis generado por Claude. Combina indicadores técnicos de 5 timeframes. Los tabs muestran los últimos 5 análisis — click para ver uno anterior." />
+        </div>
+        {/* History tabs */}
+        <div className="flex items-center gap-1">
+          {history.map((item, i) => (
+            <button
+              key={i}
+              onClick={() => setSelectedIdx(i)}
+              className={`relative text-xs px-2 py-0.5 rounded border transition-colors ${
+                selectedIdx === i
+                  ? 'bg-brand-blue/20 text-brand-blue border-brand-blue/40'
+                  : 'text-gray-600 border-brand-border hover:text-gray-300'
+              }`}
+            >
+              {i === 0 ? (
+                <>
+                  Actual
+                  {newPulse && (
+                    <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-brand-green animate-ping" />
+                  )}
+                </>
+              ) : (
+                fmtTabTime(item._ts)
+              )}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <AnalysisBody analysis={analysis} candles1h={candles1h} isPaper={isPaper} />
     </div>
   );
 }

@@ -139,7 +139,7 @@ function SignalRow({ sig }) {
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export default function TradeLog({ pair = 'BTCUSDT', refreshTrigger = 0 }) {
+export default function TradeLog({ pair = 'BTCUSDT', refreshTrigger = 0, isPaper = true }) {
   const [signals, setSignals] = useState([]);
   const [stats,   setStats]   = useState(null);
   const [loading, setLoading] = useState(false);
@@ -179,10 +179,15 @@ export default function TradeLog({ pair = 'BTCUSDT', refreshTrigger = 0 }) {
     <div className="bg-brand-card border border-brand-border rounded-lg p-4 flex flex-col gap-3">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-gray-400 tracking-wide">
-          Historial de Señales
-          <span className="ml-2 text-xs font-normal text-brand-blue">{pair}</span>
-        </h2>
+        <div className="flex items-center gap-2">
+          <h2 className="text-sm font-semibold text-gray-400 tracking-wide">
+            {isPaper
+              ? <span>📄 <span className="text-brand-yellow">Paper Trading</span> — Historial</span>
+              : <span>⚡ <span className="text-brand-red">Real Trading</span> — Historial</span>
+            }
+          </h2>
+          <span className="text-xs font-normal text-brand-blue">{pair}</span>
+        </div>
         <button
           onClick={fetchData}
           disabled={loading}

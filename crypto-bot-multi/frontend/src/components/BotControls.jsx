@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import { InfoIcon } from './Tooltip';
 
 const STRATEGIES = ['RSI_MACD', 'BOLLINGER', 'EMA_CROSS', 'COMBINED'];
@@ -13,11 +14,25 @@ const STRATEGY_INFO = {
 const sel = 'bg-brand-dark border border-brand-border rounded px-3 py-1.5 text-xs focus:outline-none focus:border-brand-blue disabled:opacity-40 transition-colors';
 
 export default function BotControls({
-  symbol, strategy, running,
+  symbol, strategy, running, tradeSize = 100,
   onSymbolChange, onStrategyChange,
-  onStart, onStop, onAnalyze, onMultiAnalyze,
+  onStart, onStop, onAnalyze, onMultiAnalyze, onTradeSizeChange,
   loadingMulti = false, loadingAnalyze = false,
 }) {
+  const [sizeInput, setSizeInput] = useState(String(tradeSize));
+
+  // Sync when prop changes externally (e.g. on connect)
+  useEffect(() => { setSizeInput(String(tradeSize)); }, [tradeSize]);
+
+  function commitSize() {
+    const v = parseFloat(sizeInput);
+    if (!isNaN(v) && v >= 1) {
+      onTradeSizeChange?.(v);
+    } else {
+      setSizeInput(String(tradeSize)); // revert invalid
+    }
+  }
+
   return (
     <div className="bg-brand-card border border-brand-border rounded-lg px-4 py-3 flex flex-wrap items-center gap-2">
 
@@ -35,6 +50,25 @@ export default function BotControls({
         <InfoIcon text={STRATEGY_INFO[strategy] || 'Estrategia de señales de entrada/salida.'} />
       </div>
 
+      {/* Trade size input */}
+      <div className="flex items-center gap-1.5">
+        <div className="flex items-center bg-brand-dark border border-brand-border rounded overflow-hidden">
+          <span className="text-xs text-gray-500 px-2 border-r border-brand-border">$</span>
+          <input
+            type="number"
+            min="1"
+            step="10"
+            value={sizeInput}
+            onChange={(e) => setSizeInput(e.target.value)}
+            onBlur={commitSize}
+            onKeyDown={(e) => e.key === 'Enter' && commitSize()}
+            className="bg-transparent text-xs text-gray-200 px-2 py-1.5 w-16 focus:outline-none tabular-nums"
+          />
+          <span className="text-xs text-gray-500 px-2 border-l border-brand-border">USDT</span>
+        </div>
+        <InfoIcon text="Monto simulado por operación en USDT. Ejemplo: $100 significa que cada señal arriesga $100. Presioná Enter o hacé click afuera para guardar." />
+      </div>
+
       <div className="flex-1" />
 
       <div className="flex items-center gap-1.5">
@@ -45,7 +79,7 @@ export default function BotControls({
         >
           {loadingMulti ? '⟳ Analizando…' : 'Multi Análisis'}
         </button>
-        <InfoIcon text="Claude analiza los 5 timeframes (5m/15m/1h/4h/1d) y da una visión completa con entrada ideal, SL y TP sugeridos. Tarda ~3s." />
+        <InfoIcon text="Claude analiza los 5 timeframes (5m/15m/1h/4h/1d) y da una visión completa con entrada ideal, SL y TP sugeridos. El resultado aparece en el panel 'Señal Claude AI' de abajo. Tarda ~3s." />
       </div>
 
       <div className="flex items-center gap-1.5">
@@ -72,8 +106,8 @@ export default function BotControls({
           </button>
         )}
         <InfoIcon text={running
-          ? 'Bot activo. Cada 60s: calcula indicadores → evalúa estrategia → si hay señal, Claude la confirma y la registra.'
-          : 'Activa el loop de trading cada 60s. En PAPER registra señales virtuales de $100 y trackea si ganan o pierden.'
+          ? 'Bot activo. Cada 60s: calcula indicadores → evalúa estrategia → si hay señal, Claude la confirma y la registra en paper trading.'
+          : 'Activa el loop de trading automático cada 60s. En PAPER registra señales virtuales y trackea si ganan o pierden.'
         } />
       </div>
     </div>

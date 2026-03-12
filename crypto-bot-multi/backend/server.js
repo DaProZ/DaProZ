@@ -25,7 +25,7 @@ binance.initStreams((pair, tf, candle) => {
   broadcast({ type: 'candleUpdate', pair, tf, data: candle });
 });
 
-// Paper trade size in USDT (amount simulated per operation)
+// Paper trade size in USDT (amount simulated per operation, runtime-configurable)
 const PAPER_TRADE_SIZE = 100;
 
 // Active bot state
@@ -34,10 +34,30 @@ const state = {
   symbol: 'BTCUSDT',
   strategy: 'RSI_MACD',
   paperTrading: process.env.PAPER_TRADING !== 'false', // true by default
+  tradeSize: PAPER_TRADE_SIZE,  // USDT per operation (configurable from UI)
+  riskConfig: {
+    dailyLossLimit:  300,   // USDT — 0 = disabled
+    maxTradesPerDay: 10,    // 0 = disabled
+    minConfidence:   0.60,  // 0.0–1.0
+  },
   trades: [],
   openPositions: [],
   stats: { totalPnl: 0, winRate: 0, totalTrades: 0 },
 };
+
+// ─── Daily risk check ────────────────────────────────────────────────────────
+function checkDailyLimits(par) {
+  const cfg = state.riskConfig;
+  const todayStats = signalDb.getTodayStats(par);
+
+  if (cfg.dailyLossLimit > 0 && todayStats.pnl <= -cfg.dailyLossLimit) {
+    return { blocked: true, reason: `Límite de pérdida diaria alcanzado (${todayStats.pnl.toFixed(2)} USDT)` };
+  }
+  if (cfg.maxTradesPerDay > 0 && todayStats.count >= cfg.maxTradesPerDay) {
+    return { blocked: true, reason: `Máximo de operaciones del día alcanzado (${todayStats.count})` };
+  }
+  return { blocked: false };
+}
 
 // Broadcast to all WS clients
 function broadcast(data) {
@@ -133,7 +153,15 @@ async function handleAction(action, payload, ws) {
 
         // Persist actionable signals (skip neutrals and cached repeats)
         if (multiAnalysis.señal !== 'neutro' && !multiAnalysis._cached && multiAnalysis.entrada_ideal) {
-          const riskUSDT = PAPER_TRADE_SIZE;
+          // Daily risk gate
+          const dailyCheck = checkDailyLimits(pair);
+          if (dailyCheck.blocked) {
+            console.log(`[SignalDB] Blocked by daily limit: ${dailyCheck.reason}`);
+            ws.send(JSON.stringify({ type: 'riskBlocked', reason: dailyCheck.reason }));
+          } else if (multiAnalysis.confianza < state.riskConfig.minConfidence) {
+            console.log(`[SignalDB] Blocked: confidence ${multiAnalysis.confianza} < ${state.riskConfig.minConfidence}`);
+          } else {
+          const riskUSDT = state.tradeSize;
           const sigId = signalDb.insertSignal({
             par:              pair,
             modo:             multiAnalysis.modo              ?? modeResult.mode,
@@ -148,6 +176,7 @@ async function handleAction(action, payload, ws) {
           const logged = signalDb.getHistory(pair, 1)[0];
           broadcast({ type: 'signalLogged', data: logged });
           console.log(`[SignalDB] Logged ${multiAnalysis.señal} ${pair} id=${sigId}`);
+          } // end risk gate
         }
       } catch (err) {
         console.error('[MultiData] Error:', err.message);
@@ -168,7 +197,9 @@ async function startTradingLoop() {
       const candles = await binance.getCachedCandles(state.symbol, '1h');
       const indis   = await indicators.getAll(candles);
       const signal  = strategyEngine.evaluate(state.strategy, indis);
-      const approved = riskManager.approve(signal, state);
+      const dailyOk  = !checkDailyLimits(state.symbol).blocked;
+      const confOk   = (signal.confidence ?? 1) >= state.riskConfig.minConfidence;
+      const approved = dailyOk && confOk && riskManager.approve(signal, state);
 
       broadcast({ type: 'indicators', data: indis });
 
@@ -276,14 +307,27 @@ app.post('/api/claude-analyze', async (req, res) => {
   res.json(analysis);
 });
 
-// PATCH /api/settings — toggle paperTrading at runtime
+// PATCH /api/settings — update runtime settings
 app.patch('/api/settings', (req, res) => {
-  if (typeof req.body.paperTrading === 'boolean') {
-    state.paperTrading = req.body.paperTrading;
-    broadcast({ type: 'state', data: state });
+  const { paperTrading, tradeSize, riskConfig } = req.body;
+
+  if (typeof paperTrading === 'boolean') {
+    state.paperTrading = paperTrading;
     console.log(`[Settings] paperTrading → ${state.paperTrading}`);
   }
-  res.json({ paperTrading: state.paperTrading });
+  if (typeof tradeSize === 'number' && tradeSize >= 1 && tradeSize <= 100_000) {
+    state.tradeSize = tradeSize;
+    console.log(`[Settings] tradeSize → ${state.tradeSize}`);
+  }
+  if (riskConfig && typeof riskConfig === 'object') {
+    if (typeof riskConfig.dailyLossLimit  === 'number') state.riskConfig.dailyLossLimit  = riskConfig.dailyLossLimit;
+    if (typeof riskConfig.maxTradesPerDay === 'number') state.riskConfig.maxTradesPerDay = riskConfig.maxTradesPerDay;
+    if (typeof riskConfig.minConfidence   === 'number') state.riskConfig.minConfidence   = riskConfig.minConfidence;
+    console.log('[Settings] riskConfig →', state.riskConfig);
+  }
+
+  broadcast({ type: 'state', data: state });
+  res.json({ paperTrading: state.paperTrading, tradeSize: state.tradeSize, riskConfig: state.riskConfig });
 });
 
 // ── Signal history ────────────────────────────────────────────────────────────
@@ -293,6 +337,16 @@ app.get('/api/signals/history', (req, res) => {
   try {
     const rows = signalDb.getHistory(pair || null, Number(limit));
     res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/signals/today?pair=BTCUSDT  — today's pnl + trade count for risk panel
+app.get('/api/signals/today', (req, res) => {
+  const { pair } = req.query;
+  try {
+    res.json(signalDb.getTodayStats(pair || null));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

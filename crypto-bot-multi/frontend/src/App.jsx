@@ -18,7 +18,8 @@ export default function App() {
   // Multi-timeframe data
   const [modeResult,        setModeResult]        = useState(null);
   const [multiCandles,      setMultiCandles]      = useState({});
-  const [claudeMulti,       setClaudeMulti]       = useState(null);
+  // History of last 5 Claude multi-analyses (newest first)
+  const [claudeHistory,     setClaudeHistory]     = useState([]);
   // Signal DB: bump to trigger TradeLog refresh
   const [signalRefresh, setSignalRefresh] = useState(0);
   // Real P&L/WinRate from SQLite (accurate, shown in StatsCards)
@@ -31,14 +32,18 @@ export default function App() {
     } catch { /* ignore */ }
   }, []);
 
-  // Toggle paper trading via REST — updated state arrives back via WS
-  const togglePaperTrading = useCallback(async (enabled) => {
+  // Generic settings patcher — merges partial settings object
+  const patchSettings = useCallback(async (settings) => {
     try {
-      await axios.patch(`${API_URL}/api/settings`, { paperTrading: enabled });
+      await axios.patch(`${API_URL}/api/settings`, settings);
     } catch (e) {
-      console.error('togglePaperTrading failed:', e.message);
+      console.error('patchSettings failed:', e.message);
     }
   }, []);
+
+  const togglePaperTrading = useCallback((enabled) => patchSettings({ paperTrading: enabled }), [patchSettings]);
+  const setTradeSize        = useCallback((size)    => patchSettings({ tradeSize: Number(size) }), [patchSettings]);
+  const setRiskConfig       = useCallback((cfg)     => patchSettings({ riskConfig: cfg }), [patchSettings]);
 
   useEffect(() => {
     messages.forEach((msg) => {
@@ -51,7 +56,10 @@ export default function App() {
         case 'candles':             setCandles(msg.data);                            break;
         case 'modeResult':          setModeResult(msg.data);                         break;
         case 'multiCandles':        setMultiCandles(msg.data);                       break;
-        case 'claudeMultiAnalysis': setClaudeMulti(msg.data);                        break;
+        case 'claudeMultiAnalysis':
+          // Keep last 5 analyses (newest first) for history tabs in SignalPanel
+          setClaudeHistory((prev) => [msg.data, ...prev].slice(0, 5));
+          break;
         case 'signalLogged':
         case 'signalClosed':
           setSignalRefresh((n) => n + 1);
@@ -76,10 +84,12 @@ export default function App() {
       send={send}
       modeResult={modeResult}
       multiCandles={multiCandles}
-      claudeMulti={claudeMulti}
+      claudeHistory={claudeHistory}
       signalRefresh={signalRefresh}
       dbStats={dbStats}
       onTogglePaperTrading={togglePaperTrading}
+      onTradeSizeChange={setTradeSize}
+      onRiskConfigChange={setRiskConfig}
     />
   );
 }

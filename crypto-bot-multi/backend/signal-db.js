@@ -176,4 +176,36 @@ function getStats(par) {
   };
 }
 
-module.exports = { insertSignal, closeSignal, getOpenSignals, checkAndCloseSignals, getHistory, getStats };
+/**
+ * Stats for signals closed TODAY (since midnight local time).
+ * Used for daily loss limit and max-trades-per-day checks.
+ */
+function getTodayStats(par) {
+  const startOfDay = new Date();
+  startOfDay.setHours(0, 0, 0, 0);
+  const startMs = startOfDay.getTime();
+
+  const rows = par
+    ? db.prepare(
+        'SELECT pnl FROM signals WHERE par = ? AND resultado IS NOT NULL AND closedAt >= ?'
+      ).all(par, startMs)
+    : db.prepare(
+        'SELECT pnl FROM signals WHERE resultado IS NOT NULL AND closedAt >= ?'
+      ).all(startMs);
+
+  // Also count open signals created today (for maxTradesPerDay)
+  const openToday = par
+    ? db.prepare(
+        'SELECT COUNT(*) as cnt FROM signals WHERE par = ? AND timestamp >= ?'
+      ).get(par, startMs).cnt
+    : db.prepare(
+        'SELECT COUNT(*) as cnt FROM signals WHERE timestamp >= ?'
+      ).get(startMs).cnt;
+
+  const pnl   = rows.reduce((sum, r) => sum + (r.pnl ?? 0), 0);
+  const count = openToday; // total signals created today (open + closed)
+
+  return { pnl: +pnl.toFixed(4), count };
+}
+
+module.exports = { insertSignal, closeSignal, getOpenSignals, checkAndCloseSignals, getHistory, getStats, getTodayStats };
