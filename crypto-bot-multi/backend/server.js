@@ -25,11 +25,15 @@ binance.initStreams((pair, tf, candle) => {
   broadcast({ type: 'candleUpdate', pair, tf, data: candle });
 });
 
+// Paper trade size in USDT (amount simulated per operation)
+const PAPER_TRADE_SIZE = 100;
+
 // Active bot state
 const state = {
   running: false,
   symbol: 'BTCUSDT',
   strategy: 'RSI_MACD',
+  paperTrading: process.env.PAPER_TRADING !== 'false', // true by default
   trades: [],
   openPositions: [],
   stats: { totalPnl: 0, winRate: 0, totalTrades: 0 },
@@ -129,7 +133,7 @@ async function handleAction(action, payload, ws) {
 
         // Persist actionable signals (skip neutrals and cached repeats)
         if (multiAnalysis.señal !== 'neutro' && !multiAnalysis._cached && multiAnalysis.entrada_ideal) {
-          const riskUSDT = +(riskManager.DEFAULT_CONFIG.portfolioValue * riskManager.DEFAULT_CONFIG.riskPerTrade).toFixed(2);
+          const riskUSDT = PAPER_TRADE_SIZE;
           const sigId = signalDb.insertSignal({
             par:              pair,
             modo:             multiAnalysis.modo              ?? modeResult.mode,
@@ -216,7 +220,7 @@ async function startTradingLoop() {
         };
 
         // In paper-trading mode we don't place real orders
-        if (process.env.PAPER_TRADING !== 'false') {
+        if (state.paperTrading) {
           state.trades.push(trade);
           state.stats.totalTrades++;
           broadcast({ type: 'trade', data: trade });
@@ -270,6 +274,16 @@ app.post('/api/claude-analyze', async (req, res) => {
   const { symbol, candles } = req.body;
   const analysis = await claudeAnalysis.analyze(symbol, candles);
   res.json(analysis);
+});
+
+// PATCH /api/settings — toggle paperTrading at runtime
+app.patch('/api/settings', (req, res) => {
+  if (typeof req.body.paperTrading === 'boolean') {
+    state.paperTrading = req.body.paperTrading;
+    broadcast({ type: 'state', data: state });
+    console.log(`[Settings] paperTrading → ${state.paperTrading}`);
+  }
+  res.json({ paperTrading: state.paperTrading });
 });
 
 // ── Signal history ────────────────────────────────────────────────────────────

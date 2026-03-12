@@ -12,20 +12,36 @@ import SignalPanel     from '../components/SignalPanel';
 export default function Dashboard({
   connected, state, indicators, trades, signal, claudeAnalysis, candles, send,
   modeResult, multiCandles, claudeMulti, signalRefresh,
+  dbStats, onTogglePaperTrading,
 }) {
-  const [symbol,   setSymbol]   = useState('BTCUSDT');
-  const [strategy, setStrategy] = useState('RSI_MACD');
+  const [symbol,        setSymbol]        = useState('BTCUSDT');
+  const [strategy,      setStrategy]      = useState('RSI_MACD');
+  const [loadingMulti,  setLoadingMulti]  = useState(false);
+  const [loadingAnalyze,setLoadingAnalyze]= useState(false);
 
-  function handleStart() {
+  async function handleStart() {
     send('start',        { symbol, strategy });
     send('getCandles',   { symbol, interval: '1h', limit: 100 });
+    setLoadingMulti(true);
     send('getMultiData', { symbol });
+    setTimeout(() => setLoadingMulti(false), 4000);
   }
-  function handleStop()          { send('stop'); }
-  function handleAnalyze()       { send('analyzeWithClaude', { symbol, candles }); }
-  function handleMultiAnalyze()  { send('getMultiData', { symbol }); }
+  function handleStop() { send('stop'); }
 
-  const candles1h = multiCandles?.['1h'] ?? candles;
+  function handleAnalyze() {
+    setLoadingAnalyze(true);
+    send('analyzeWithClaude', { symbol, candles });
+    setTimeout(() => setLoadingAnalyze(false), 5000);
+  }
+
+  function handleMultiAnalyze() {
+    setLoadingMulti(true);
+    send('getMultiData', { symbol });
+    setTimeout(() => setLoadingMulti(false), 5000);
+  }
+
+  const candles1h     = multiCandles?.['1h'] ?? candles;
+  const isPaper       = state?.paperTrading !== false; // default true
 
   return (
     <div className="min-h-screen bg-brand-dark text-gray-200 p-3 lg:p-4 space-y-3">
@@ -42,13 +58,27 @@ export default function Dashboard({
             {connected ? '● WS' : '○ OFF'}
           </span>
         </div>
-        {state && (
-          <span className={`text-xs font-semibold px-3 py-1 rounded-full border ${state.running
-            ? 'bg-brand-green/10 text-brand-green border-brand-green/30'
-            : 'bg-brand-border/40 text-gray-500 border-brand-border'}`}>
-            {state.running ? '▶ RUNNING' : '■ STOPPED'}
-          </span>
-        )}
+        <div className="flex items-center gap-2">
+          {/* Paper trading toggle */}
+          <button
+            onClick={() => onTogglePaperTrading?.(!isPaper)}
+            title={isPaper ? 'Modo PAPER: click para activar trading real' : 'Modo REAL: click para volver a paper'}
+            className={`text-xs font-bold px-3 py-1 rounded-full border transition-colors ${
+              isPaper
+                ? 'bg-brand-yellow/10 text-brand-yellow border-brand-yellow/40 hover:bg-brand-yellow/20'
+                : 'bg-brand-red/10 text-brand-red border-brand-red/40 hover:bg-brand-red/20'
+            }`}
+          >
+            {isPaper ? '📄 PAPER' : '⚡ REAL'}
+          </button>
+          {state && (
+            <span className={`text-xs font-semibold px-3 py-1 rounded-full border ${state.running
+              ? 'bg-brand-green/10 text-brand-green border-brand-green/30'
+              : 'bg-brand-border/40 text-gray-500 border-brand-border'}`}>
+              {state.running ? '▶ RUNNING' : '■ STOPPED'}
+            </span>
+          )}
+        </div>
       </header>
 
       {/* Controls */}
@@ -57,6 +87,7 @@ export default function Dashboard({
         onSymbolChange={setSymbol} onStrategyChange={setStrategy}
         onStart={handleStart} onStop={handleStop}
         onAnalyze={handleAnalyze} onMultiAnalyze={handleMultiAnalyze}
+        loadingMulti={loadingMulti} loadingAnalyze={loadingAnalyze}
       />
 
       {/* Mode badge + Stats */}
@@ -65,7 +96,7 @@ export default function Dashboard({
           <ModeSelector modeResult={modeResult} />
         </div>
         <div className="lg:col-span-3">
-          <StatsCards stats={state?.stats} signal={signal} />
+          <StatsCards dbStats={dbStats} signal={signal} />
         </div>
       </div>
 
@@ -74,17 +105,17 @@ export default function Dashboard({
 
       {/* Claude signal + indicators */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-        <SignalPanel analysis={claudeMulti ?? claudeAnalysis} candles1h={candles1h} />
+        <SignalPanel analysis={claudeMulti ?? claudeAnalysis} candles1h={candles1h} isPaper={isPaper} />
         <IndicatorsPanel indicators={indicators} />
       </div>
 
       {/* Price chart */}
       <CandleChart candles={candles} symbol={symbol} />
 
-      {/* Signal history (full width — it has its own scroll) */}
+      {/* Signal history */}
       <TradeLog pair={symbol} refreshTrigger={signalRefresh} />
 
-      {/* Legacy Claude panel (fallback when no multi-analysis yet) */}
+      {/* Legacy Claude panel (fallback) */}
       {claudeAnalysis && !claudeMulti && <ClaudePanel analysis={claudeAnalysis} />}
     </div>
   );

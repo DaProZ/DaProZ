@@ -4,8 +4,9 @@
     {
       "name": "backend",
       "runtimeExecutable": "node",
-      "runtimeArgs": ["D:/DaProZ/crypto-bot-multi/backend/server.js"],
-      "port": 3001
+      "runtimeArgs": ["--env-file=D:/DaProZ/crypto-bot-multi/backend/.env", "D:/DaProZ/crypto-bot-multi/backend/server.js"],
+      "port": 3001,
+      "autoPort": false
     },
     {
       "name": "frontend",

@@ -2,6 +2,7 @@ import {
   ComposedChart, Line, ReferenceLine, ReferenceArea,
   XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
 } from 'recharts';
+import { InfoIcon } from './Tooltip';
 
 const SIGNAL_CFG = {
   compra: {
@@ -114,7 +115,7 @@ const ChartTooltip = ({ active, payload, label }) => {
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export default function SignalPanel({ analysis, candles1h = [] }) {
+export default function SignalPanel({ analysis, candles1h = [], isPaper = true }) {
   if (!analysis) {
     return (
       <div className="bg-brand-card border border-brand-border rounded-lg p-4 flex items-center justify-center min-h-[220px]">
@@ -160,7 +161,10 @@ export default function SignalPanel({ analysis, candles1h = [] }) {
     <div className="bg-brand-card border border-brand-border rounded-lg p-4 space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-gray-400 tracking-wide">Señal Claude AI</h2>
+        <div className="flex items-center gap-1.5">
+          <h2 className="text-sm font-semibold text-gray-400 tracking-wide">Señal Claude AI</h2>
+          <InfoIcon text="Análisis generado por claude-haiku. Combina indicadores técnicos de 5 timeframes para dar una recomendación con entrada, SL y TP sugeridos." />
+        </div>
         <div className="flex items-center gap-2 text-xs text-gray-600">
           {_cached && (
             <span className="px-1.5 py-0.5 rounded border border-brand-border bg-brand-dark">
@@ -170,6 +174,30 @@ export default function SignalPanel({ analysis, candles1h = [] }) {
           {_ts && <span>{new Date(_ts).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })}</span>}
         </div>
       </div>
+
+      {/* Paper / Real notice */}
+      {isPaper ? (
+        <div className="flex items-start gap-2 rounded px-2.5 py-2 text-xs leading-snug"
+             style={{ background: 'rgba(234,179,8,0.06)', border: '1px solid rgba(234,179,8,0.25)', color: '#8b949e' }}>
+          <span style={{ color: '#eab308' }} className="flex-shrink-0">📄</span>
+          <span>
+            <span style={{ color: '#eab308' }} className="font-semibold">PAPER ($100/op) — </span>
+            El bot simula <strong className="text-gray-300">$100 por señal</strong>, monitorea
+            SL/TP en cada vela y registra WIN/LOSS automáticamente.
+            <strong className="text-gray-300"> Sin dinero real.</strong>
+          </span>
+        </div>
+      ) : (
+        <div className="flex items-start gap-2 rounded px-2.5 py-2 text-xs leading-snug"
+             style={{ background: 'rgba(248,81,73,0.07)', border: '1px solid rgba(248,81,73,0.35)', color: '#8b949e' }}>
+          <span className="text-brand-red flex-shrink-0">⚡</span>
+          <span>
+            <span className="text-brand-red font-semibold">TRADING REAL — </span>
+            El bot ejecuta <strong className="text-gray-300">market orders reales en Binance</strong>.
+            SL/TP se monitorean en software (no son órdenes stop en Binance todavía).
+          </span>
+        </div>
+      )}
 
       {/* Signal badge + levels */}
       <div className="grid grid-cols-5 gap-3">
@@ -199,11 +227,14 @@ export default function SignalPanel({ analysis, candles1h = [] }) {
         {/* Level rows — spans 3 cols */}
         <div className="col-span-3">
           <LevelRow label="Entrada"     value={entrada_ideal} color="#58a6ff" icon="→" />
-          <LevelRow label="Stop Loss"   value={stopLoss}      color="#f85149" icon="✕" />
-          <LevelRow label="Take Profit" value={takeProfit}    color="#3fb950" icon="✓" />
+          <LevelRow label="Stop Loss ⚑" value={stopLoss}      color="#f85149" icon="✕" />
+          <LevelRow label="Take Profit ✦" value={takeProfit}  color="#3fb950" icon="✓" />
           {rr !== null && (
             <div className="flex items-center justify-between pt-1.5 mt-0.5 border-t border-brand-border">
-              <span className="text-xs text-gray-500">Ratio R/R</span>
+              <div className="flex items-center gap-1">
+                <span className="text-xs text-gray-500">Ratio R/R</span>
+                <InfoIcon text="Relación riesgo/recompensa. 1:2 significa que ganás 2 por cada 1 que arriesgás. Idealmente >= 1.5. Rojo < 1, amarillo 1-2, verde >= 2." />
+              </div>
               <span className="text-sm font-bold font-mono tabular-nums" style={{ color: rrColor(rr) }}>
                 1:{rr.toFixed(2)}
               </span>
